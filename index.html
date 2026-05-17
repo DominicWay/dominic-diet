@@ -297,6 +297,38 @@ tbody tr:hover { background: var(--primary-light); }
 .empty-text { font-size: 16px; }
 .empty-sub { font-size: 13px; margin-top: 8px; }
 
+/* ── 密码验证弹窗 ── */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.45); z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn .2s;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal-box {
+  background: var(--card); border-radius: 16px; padding: 32px;
+  width: 340px; max-width: 90vw; box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+  animation: slideUp .25s;
+}
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal-box h3 { font-size: 18px; margin-bottom: 6px; }
+.modal-box p { font-size: 13px; color: var(--text2); margin-bottom: 18px; }
+.modal-box input {
+  width: 100%; padding: 10px 14px; border: 1.5px solid var(--border);
+  border-radius: 8px; font-size: 15px; outline: none; margin-bottom: 16px;
+  text-align: center; letter-spacing: 4px;
+}
+.modal-box input:focus { border-color: var(--primary); }
+.modal-box .btn { width: 100%; justify-content: center; }
+
+/* ── 密码状态指示 ── */
+.pw-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600;
+}
+.pw-badge.on { background: #e8f8f0; color: #27ae60; }
+.pw-badge.off { background: #f0f0f0; color: #999; }
+
 /* ── 响应式 ── */
 @media (max-width: 640px) {
   .navbar-logo .full-title { display: none; }
@@ -559,6 +591,28 @@ tbody tr:hover { background: var(--primary-light); }
     </div>
 
     <div class="card">
+      <div class="card-title">🔒 写入权限密码</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">
+        设置密码后，只有输入正确密码才能<strong>录入、编辑、删除</strong>数据。访客可自由浏览概览、图表和历史记录。<br>
+        当前状态：<span id="pw-status-badge" class="pw-badge off">未设置</span>
+      </p>
+      <div class="form-grid" style="max-width:400px;">
+        <div class="form-group">
+          <label>设置 / 修改密码</label>
+          <input type="password" id="s-pw-new" placeholder="输入新密码（至少4位）">
+        </div>
+        <div class="form-group">
+          <label>确认密码</label>
+          <input type="password" id="s-pw-confirm" placeholder="再次输入新密码">
+        </div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="setWritePassword()">💾 保存密码</button>
+        <button class="btn btn-danger" onclick="removeWritePassword()">🗑️ 清除密码</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title">💾 数据管理</div>
       <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">数据默认存储在浏览器本地（localStorage）。配置 Supabase 后可跨设备同步。</p>
       <div class="btn-group">
@@ -691,6 +745,137 @@ async function syncToCloud() {
     await sbUpsert('profile', localStorage.getItem(PROFILE_KEY) || '{}');
     updateCloudStatus('ok');
   } catch(e) { console.warn('syncToCloud:', e); updateCloudStatus('err'); }
+}
+
+// ══════════════════════════════════════════════
+//  写入权限密码
+// ══════════════════════════════════════════════
+const PW_KEY = 'mi_weight_pw_hash';
+let _pwVerified = sessionStorage.getItem(PW_KEY + '_ok') === '1';
+
+// SHA-256 哈希（Web Crypto API）
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 获取已存储的密码哈希
+function getPwHash() {
+  try { return JSON.parse(localStorage.getItem(PW_KEY)) || ''; } catch(e) { return ''; }
+}
+
+// 保存密码哈希到本地 & 云端
+async function savePwHash(hash) {
+  localStorage.setItem(PW_KEY, JSON.stringify(hash));
+  if (_cloudReady && hash) await sbUpsert('pw_hash', hash);
+  else if (_cloudReady && !hash) {
+    // 清除云端密码哈希
+    try { await _supabase.from('app_data').delete().eq('key', 'pw_hash'); } catch(e) {}
+  }
+}
+
+// 设置密码（设置页调用）
+async function setWritePassword() {
+  const pw = document.getElementById('s-pw-new').value;
+  const confirm = document.getElementById('s-pw-confirm').value;
+  if (!pw) { showToast('请输入密码', 'error'); return; }
+  if (pw.length < 4) { showToast('密码至少4位', 'error'); return; }
+  if (pw !== confirm) { showToast('两次输入不一致', 'error'); return; }
+  const hash = await sha256(pw);
+  await savePwHash(hash);
+  _pwVerified = true;
+  sessionStorage.setItem(PW_KEY + '_ok', '1');
+  document.getElementById('s-pw-new').value = '';
+  document.getElementById('s-pw-confirm').value = '';
+  updatePwBadge();
+  showToast('写入密码已设置', 'success');
+}
+
+// 清除密码
+async function removeWritePassword() {
+  if (!confirm('确认清除写入密码？之后任何人都可以修改数据。')) return;
+  await savePwHash('');
+  _pwVerified = false;
+  sessionStorage.removeItem(PW_KEY + '_ok');
+  updatePwBadge();
+  showToast('写入密码已清除', 'success');
+}
+
+// 更新密码状态徽章
+function updatePwBadge() {
+  const badge = document.getElementById('pw-status-badge');
+  if (!badge) return;
+  const hash = getPwHash();
+  if (hash) {
+    badge.className = 'pw-badge on';
+    badge.textContent = '已启用';
+  } else {
+    badge.className = 'pw-badge off';
+    badge.textContent = '未设置';
+  }
+}
+
+// 弹出密码验证弹窗，验证通过后执行 callback
+function requirePassword(callback) {
+  const hash = getPwHash();
+  // 没有设置密码 → 直接放行
+  if (!hash) { callback(); return; }
+  // 本次会话已验证 → 直接放行
+  if (_pwVerified) { callback(); return; }
+
+  // 弹出密码输入框
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>🔒 请输入写入密码</h3>
+      <p>此操作需要密码验证才能继续</p>
+      <input type="password" id="modal-pw-input" placeholder="密码" autofocus>
+      <div class="btn-group">
+        <button class="btn btn-primary" id="modal-pw-ok">确认</button>
+        <button class="btn btn-secondary" id="modal-pw-cancel">取消</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const input = document.getElementById('modal-pw-input');
+  input.focus();
+
+  const close = () => document.body.removeChild(overlay);
+
+  document.getElementById('modal-pw-cancel').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+  const doVerify = async () => {
+    const pw = input.value;
+    if (!pw) { input.style.borderColor = '#d63031'; return; }
+    const inputHash = await sha256(pw);
+    if (inputHash === hash) {
+      _pwVerified = true;
+      sessionStorage.setItem(PW_KEY + '_ok', '1');
+      close();
+      callback();
+    } else {
+      showToast('密码错误', 'error');
+      input.value = '';
+      input.style.borderColor = '#d63031';
+      setTimeout(() => input.style.borderColor = '', 1000);
+    }
+  };
+
+  document.getElementById('modal-pw-ok').onclick = doVerify;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doVerify(); });
+}
+
+// 同步密码哈希（从云端）
+async function syncPwFromCloud() {
+  if (!_cloudReady) return;
+  try {
+    const pObj = await sbFetchOne('pw_hash');
+    if (pObj && pObj.value) {
+      localStorage.setItem(PW_KEY, JSON.stringify(pObj.value));
+    }
+  } catch(e) {}
 }
 
 // 字段映射：id → { label, unit }
@@ -879,9 +1064,12 @@ function showToast(msg, type='info') {
 // 默认填写今日日期
 window.addEventListener('DOMContentLoaded', async () => {
   _cloudReady = initCloud();
-  if (_cloudReady) await syncFromCloud();
-  else updateCloudStatus('off');
+  if (_cloudReady) {
+    await syncFromCloud();
+    await syncPwFromCloud();
+  } else updateCloudStatus('off');
   document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+  updatePwBadge();
   renderDashboard();
   loadSettingsForm();
 });
@@ -1201,36 +1389,42 @@ function renderHistory() {
 }
 
 function editRecord(date) {
-  const records = loadRecords();
-  const rec = records.find(r => r.date === date);
-  if (!rec) return;
-  // 填入表单
-  for (const [fid, key] of Object.entries(FORM_MAP)) {
-    const el = document.getElementById(fid);
-    if (!el) continue;
-    el.value = rec[key] != null ? rec[key] : '';
-  }
-  switchPage('add');
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-btn')[1].classList.add('active');
-  showToast(`已加载 ${date} 的记录，修改后点击保存可覆盖`, 'info');
+  requirePassword(() => {
+    const records = loadRecords();
+    const rec = records.find(r => r.date === date);
+    if (!rec) return;
+    // 填入表单
+    for (const [fid, key] of Object.entries(FORM_MAP)) {
+      const el = document.getElementById(fid);
+      if (!el) continue;
+      el.value = rec[key] != null ? rec[key] : '';
+    }
+    switchPage('add');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-btn')[1].classList.add('active');
+    showToast(`已加载 ${date} 的记录，修改后点击保存可覆盖`, 'info');
+  });
 }
 
 function deleteRecord(date) {
-  if (!confirm(`确认删除 ${date} 的记录？`)) return;
-  const records = loadRecords().filter(r => r.date !== date);
-  saveRecords(records);
-  renderHistory();
-  showToast(`已删除 ${date} 的记录`, 'success');
-  syncToCloud();
+  requirePassword(() => {
+    if (!confirm(`确认删除 ${date} 的记录？`)) return;
+    const records = loadRecords().filter(r => r.date !== date);
+    saveRecords(records);
+    renderHistory();
+    showToast(`已删除 ${date} 的记录`, 'success');
+    syncToCloud();
+  });
 }
 
 function clearAllData() {
-  if (!confirm('确认清空所有测量数据？此操作不可撤销！')) return;
-  saveRecords([]);
-  renderHistory();
-  showToast('已清空所有数据', 'warning');
-  syncToCloud();
+  requirePassword(() => {
+    if (!confirm('确认清空所有测量数据？此操作不可撤销！')) return;
+    saveRecords([]);
+    renderHistory();
+    showToast('已清空所有数据', 'warning');
+    syncToCloud();
+  });
 }
 
 // ══════════════════════════════════════════════
@@ -1244,7 +1438,7 @@ function loadSettingsForm() {
   document.getElementById('s-height').value = p.height || '';
   document.getElementById('s-start-weight').value = p.startWeight || '';
   document.getElementById('s-target-weight').value = p.targetWeight || '';
-
+  updatePwBadge();
   const disp = document.getElementById('profile-display');
   if (p.name) {
     disp.innerHTML = `
@@ -1258,18 +1452,20 @@ function loadSettingsForm() {
 }
 
 function saveProfile() {
-  const p = {
-    name:         document.getElementById('s-name').value.trim(),
-    gender:       document.getElementById('s-gender').value,
-    age:          parseFloat(document.getElementById('s-age').value) || null,
-    height:       parseFloat(document.getElementById('s-height').value) || null,
-    startWeight:  parseFloat(document.getElementById('s-start-weight').value) || null,
-    targetWeight: parseFloat(document.getElementById('s-target-weight').value) || null,
-  };
-  saveProfileData(p);
-  loadSettingsForm();
-  showToast('个人信息已保存', 'success');
-  syncToCloud();
+  requirePassword(() => {
+    const p = {
+      name:         document.getElementById('s-name').value.trim(),
+      gender:       document.getElementById('s-gender').value,
+      age:          parseFloat(document.getElementById('s-age').value) || null,
+      height:       parseFloat(document.getElementById('s-height').value) || null,
+      startWeight:  parseFloat(document.getElementById('s-start-weight').value) || null,
+      targetWeight: parseFloat(document.getElementById('s-target-weight').value) || null,
+    };
+    saveProfileData(p);
+    loadSettingsForm();
+    showToast('个人信息已保存', 'success');
+    syncToCloud();
+  });
 }
 
 // ══════════════════════════════════════════════
@@ -1327,28 +1523,30 @@ function download(filename, mime, content) {
 
 // ── 保存记录 ──
 function saveRecord() {
-  const rec = readForm();
-  if (!rec.date) { showToast('请先填写测量日期', 'error'); return; }
-  if (!rec.weight) { showToast('至少需要填写体重', 'error'); return; }
+  requirePassword(() => {
+    const rec = readForm();
+    if (!rec.date) { showToast('请先填写测量日期', 'error'); return; }
+    if (!rec.weight) { showToast('至少需要填写体重', 'error'); return; }
 
-  // 附带录入时间
-  if (!rec.uploadTime) {
-    rec.uploadTime = new Date().toLocaleString('zh-CN', { hour12: false });
-  }
+    // 附带录入时间
+    if (!rec.uploadTime) {
+      rec.uploadTime = new Date().toLocaleString('zh-CN', { hour12: false });
+    }
 
-  const records = loadRecords();
-  const existIdx = records.findIndex(r => r.date === rec.date);
-  if (existIdx >= 0) {
-    if (!confirm(`${rec.date} 已有记录，是否覆盖？`)) return;
-    records[existIdx] = rec;
-    showToast(`已更新 ${rec.date} 的记录`, 'success');
-  } else {
-    records.push(rec);
-    showToast(`已保存 ${rec.date} 的记录`, 'success');
-  }
-  records.sort((a, b) => a.date.localeCompare(b.date));
-  saveRecords(records);
-  syncToCloud();
+    const records = loadRecords();
+    const existIdx = records.findIndex(r => r.date === rec.date);
+    if (existIdx >= 0) {
+      if (!confirm(`${rec.date} 已有记录，是否覆盖？`)) return;
+      records[existIdx] = rec;
+      showToast(`已更新 ${rec.date} 的记录`, 'success');
+    } else {
+      records.push(rec);
+      showToast(`已保存 ${rec.date} 的记录`, 'success');
+    }
+    records.sort((a, b) => a.date.localeCompare(b.date));
+    saveRecords(records);
+    syncToCloud();
+  });
 }
 </script>
 </body>
