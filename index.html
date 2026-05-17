@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>减肥数据追踪 · 小米体重秤</title>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<!-- date-fns adapter for Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<!-- Supabase SDK（云同步） -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root {
+  --bg: #f5f7fa;
+  --card: #ffffff;
+  --primary: #ff6900;
+  --primary-light: #fff3ec;
+  --text: #1a1a1a;
+  --text2: #666;
+  --border: #e8ecf0;
+  --radius: 12px;
+  --shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* ── 顶部导航 ── */
+.navbar {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 60px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 1px 8px rgba(0,0,0,0.06);
+}
+.navbar-logo {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.navbar-logo span { font-size: 26px; }
+.navbar-tabs { display: flex; gap: 4px; margin-left: auto; }
+.tab-btn {
+  padding: 8px 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text2);
+  font-weight: 500;
+  transition: all .2s;
+}
+.tab-btn:hover { background: var(--primary-light); color: var(--primary); }
+.tab-btn.active { background: var(--primary); color: #fff; }
+
+/* ── 主容器 ── */
+.main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+
+/* ── 页签内容 ── */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── 卡片 ── */
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.card-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 18px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 18px;
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+/* ── 表单 ── */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-group label { font-size: 13px; color: var(--text2); font-weight: 500; }
+.form-group input, .form-group select {
+  padding: 9px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text);
+  background: #fafbfc;
+  transition: border-color .2s;
+  outline: none;
+}
+.form-group input:focus, .form-group select:focus {
+  border-color: var(--primary);
+  background: #fff;
+}
+
+/* ── 分区小标题 ── */
+.section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-light);
+  padding: 4px 10px;
+  border-radius: 6px;
+  margin: 16px 0 10px;
+  display: inline-block;
+}
+
+/* ── 按钮 ── */
+.btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all .2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: #e05e00; }
+.btn-secondary { background: var(--bg); color: var(--text2); border: 1.5px solid var(--border); }
+.btn-secondary:hover { background: var(--border); }
+.btn-danger { background: #fff0f0; color: #d63031; border: 1.5px solid #ffc1c1; }
+.btn-danger:hover { background: #ffd3d3; }
+.btn-group { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+
+/* ── 数据列表表格 ── */
+.data-table-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+thead tr {
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+}
+th, td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+th { font-weight: 600; color: var(--text2); font-size: 12px; }
+tbody tr:hover { background: var(--primary-light); }
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-green { background: #e8f8f0; color: #27ae60; }
+.badge-red { background: #fff0f0; color: #d63031; }
+.badge-blue { background: #e8f0ff; color: #2563eb; }
+
+/* ── 图表区 ── */
+.chart-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  align-items: center;
+}
+.chart-select {
+  padding: 8px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff;
+  cursor: pointer;
+}
+.chart-select:focus { outline: none; border-color: var(--primary); }
+
+.chart-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.chart-tag {
+  padding: 5px 12px;
+  border-radius: 99px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  font-weight: 500;
+  transition: all .15s;
+  opacity: 0.55;
+}
+.chart-tag.active { opacity: 1; border-color: currentColor; }
+
+.chart-wrap {
+  position: relative;
+  height: 420px;
+}
+
+/* ── 统计卡片 ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.stat-card {
+  background: var(--card);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+  border-left: 4px solid var(--primary);
+}
+.stat-label { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.stat-value { font-size: 22px; font-weight: 700; color: var(--text); }
+.stat-change { font-size: 12px; margin-top: 4px; }
+.stat-change.up { color: #d63031; }
+.stat-change.down { color: #27ae60; }
+.stat-change.good-up { color: #27ae60; }
+
+/* ── Toast通知 ── */
+#toast {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: #1a1a1a;
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  z-index: 9999;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all .3s;
+  pointer-events: none;
+  max-width: 320px;
+}
+#toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── 设置页 ── */
+.profile-avatar {
+  width: 64px; height: 64px;
+  background: var(--primary);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px;
+  margin-bottom: 12px;
+}
+.profile-name { font-size: 20px; font-weight: 700; }
+.profile-sub { font-size: 13px; color: var(--text2); margin-top: 4px; }
+
+/* ── 空状态 ── */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text2);
+}
+.empty-icon { font-size: 56px; margin-bottom: 16px; }
+.empty-text { font-size: 16px; }
+.empty-sub { font-size: 13px; margin-top: 8px; }
+
+/* ── 响应式 ── */
+@media (max-width: 640px) {
+  .navbar-logo .full-title { display: none; }
+  .tab-btn { padding: 8px 12px; font-size: 13px; }
+  .chart-wrap { height: 280px; }
+}
+</style>
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar">
+  <div class="navbar-logo">
+    <span>⚖️</span>
+    <span class="full-title">减肥数据追踪</span>
+    <span id="cloud-status" style="font-size:18px;margin-left:6px;cursor:default;opacity:0.7;" title="云端同步">📱</span>
+  </div>
+  <div class="navbar-tabs">
+    <button class="tab-btn active" onclick="switchPage('dashboard')">📊 概览</button>
+    <button class="tab-btn" onclick="switchPage('add')">➕ 录入</button>
+    <button class="tab-btn" onclick="switchPage('chart')">📈 图表</button>
+    <button class="tab-btn" onclick="switchPage('history')">📋 历史</button>
+    <button class="tab-btn" onclick="switchPage('settings')">⚙️ 设置</button>
+  </div>
+</nav>
+
+<div class="main">
+
+  <!-- ════ 概览页 ════ -->
+  <div id="page-dashboard" class="page active">
+    <div id="stats-grid-wrap"></div>
+    <div class="card">
+      <div class="card-title">体重变化趋势</div>
+      <div class="chart-wrap">
+        <canvas id="chart-weight-mini"></canvas>
+      </div>
+    </div>
+    <div id="dashboard-empty" class="empty-state" style="display:none;">
+      <div class="empty-icon">📋</div>
+      <div class="empty-text">还没有任何数据</div>
+      <div class="empty-sub">点击「录入」添加第一条测量记录吧！</div>
+    </div>
+  </div>
+
+  <!-- ════ 录入页 ════ -->
+  <div id="page-add" class="page">
+
+    <!-- 手动录入表单 -->
+    <div class="card">
+      <div class="card-title">✏️ 手动录入 / 核对数据</div>
+
+      <div class="section-label">📅 基本信息</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>测量日期 *</label>
+          <input type="date" id="f-date">
+        </div>
+        <div class="form-group">
+          <label>体重（kg）*</label>
+          <input type="number" step="0.01" id="f-weight" placeholder="如 94.5">
+        </div>
+        <div class="form-group">
+          <label>BMI</label>
+          <input type="number" step="0.01" id="f-bmi" placeholder="如 27.8">
+        </div>
+        <div class="form-group">
+          <label>心率（次/min）</label>
+          <input type="number" step="1" id="f-heart-rate" placeholder="如 75">
+        </div>
+        <div class="form-group">
+          <label>身体年龄（岁）</label>
+          <input type="number" step="1" id="f-body-age" placeholder="如 25">
+        </div>
+        <div class="form-group">
+          <label>身体得分</label>
+          <input type="number" step="0.1" id="f-body-score" placeholder="如 82.5">
+        </div>
+        <div class="form-group">
+          <label>内脏脂肪等级</label>
+          <input type="number" step="1" id="f-visceral-fat" placeholder="如 10">
+        </div>
+        <div class="form-group">
+          <label>推测腰臀比</label>
+          <input type="number" step="0.001" id="f-whr" placeholder="如 0.882">
+        </div>
+        <div class="form-group">
+          <label>建议热量摄入（kcal）</label>
+          <input type="number" step="1" id="f-calorie-intake" placeholder="如 1800">
+        </div>
+        <div class="form-group">
+          <label>基础代谢率（kcal）</label>
+          <input type="number" step="1" id="f-bmr" placeholder="如 1650">
+        </div>
+        <div class="form-group">
+          <label>去脂体重（kg）</label>
+          <input type="number" step="0.01" id="f-lean-mass" placeholder="如 68.2">
+        </div>
+        <div class="form-group">
+          <label>骨骼肌指数</label>
+          <input type="number" step="0.01" id="f-smi" placeholder="如 8.5">
+        </div>
+      </div>
+
+      <div class="section-label">💪 肌肉 & 脂肪组成</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>肌肉量（kg）</label>
+          <input type="number" step="0.01" id="f-muscle-mass" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>肌肉率（%）</label>
+          <input type="number" step="0.01" id="f-muscle-rate" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>脂肪量（kg）</label>
+          <input type="number" step="0.01" id="f-fat-mass" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>体脂率（%）</label>
+          <input type="number" step="0.01" id="f-body-fat" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>骨骼肌量（kg）</label>
+          <input type="number" step="0.01" id="f-skeletal-muscle" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>蛋白质量（kg）</label>
+          <input type="number" step="0.01" id="f-protein-mass" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>蛋白质率（%）</label>
+          <input type="number" step="0.01" id="f-protein-rate" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>体水分量（kg）</label>
+          <input type="number" step="0.01" id="f-water-mass" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>身体水分（%）</label>
+          <input type="number" step="0.01" id="f-water-rate" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>骨盐量（kg）</label>
+          <input type="number" step="0.01" id="f-bone-mass" placeholder="">
+        </div>
+        <div class="form-group">
+          <label>骨盐率（%）</label>
+          <input type="number" step="0.01" id="f-bone-rate" placeholder="">
+        </div>
+      </div>
+
+      <div class="section-label">🦾 分部位脂肪（kg）</div>
+      <div class="form-grid">
+        <div class="form-group"><label>左上肢脂肪</label><input type="number" step="0.01" id="f-fat-left-arm"></div>
+        <div class="form-group"><label>右上肢脂肪</label><input type="number" step="0.01" id="f-fat-right-arm"></div>
+        <div class="form-group"><label>躯干脂肪</label><input type="number" step="0.01" id="f-fat-trunk"></div>
+        <div class="form-group"><label>左下肢脂肪</label><input type="number" step="0.01" id="f-fat-left-leg"></div>
+        <div class="form-group"><label>右下肢脂肪</label><input type="number" step="0.01" id="f-fat-right-leg"></div>
+      </div>
+
+      <div class="section-label">🦿 分部位肌肉（kg）</div>
+      <div class="form-grid">
+        <div class="form-group"><label>左上肢肌肉</label><input type="number" step="0.01" id="f-muscle-left-arm"></div>
+        <div class="form-group"><label>右上肢肌肉</label><input type="number" step="0.01" id="f-muscle-right-arm"></div>
+        <div class="form-group"><label>躯干肌肉</label><input type="number" step="0.01" id="f-muscle-trunk"></div>
+        <div class="form-group"><label>左下肢肌肉</label><input type="number" step="0.01" id="f-muscle-left-leg"></div>
+        <div class="form-group"><label>右下肢肌肉</label><input type="number" step="0.01" id="f-muscle-right-leg"></div>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="saveRecord()">💾 保存记录</button>
+        <button class="btn btn-secondary" onclick="clearForm()">🗑️ 清空表单</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ 图表页 ════ -->
+  <div id="page-chart" class="page">
+    <div class="card">
+      <div class="card-title">📈 折线图分析</div>
+      <div class="chart-controls">
+        <select class="chart-select" id="chart-group" onchange="renderMainChart()">
+          <option value="core">核心指标</option>
+          <option value="body-comp">身体组成</option>
+          <option value="part-fat">分部位脂肪</option>
+          <option value="part-muscle">分部位肌肉</option>
+          <option value="custom">自定义</option>
+        </select>
+        <span style="font-size:13px;color:var(--text2);">时间范围：</span>
+        <select class="chart-select" id="chart-range" onchange="renderMainChart()">
+          <option value="all">全部</option>
+          <option value="30">近30天</option>
+          <option value="60">近60天</option>
+        <option value="90">近90天</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer;margin-left:auto;">
+        <input type="checkbox" id="ref-toggle" checked onchange="showRefLines=this.checked;renderMainChart();">
+        显示标准参考线
+      </label>
+    </div>
+      <div class="chart-tags" id="chart-tags"></div>
+      <div class="chart-wrap">
+        <canvas id="chart-main"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ 历史页 ════ -->
+  <div id="page-history" class="page">
+    <div class="card">
+      <div class="card-title">📋 测量历史记录</div>
+      <div class="btn-group" style="margin-bottom:16px;margin-top:0;">
+        <button class="btn btn-secondary" onclick="exportCSV()">⬇️ 导出 CSV</button>
+        <button class="btn btn-danger" onclick="clearAllData()">🗑️ 清空所有数据</button>
+      </div>
+      <div class="data-table-wrap">
+        <div id="history-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ 设置页 ════ -->
+  <div id="page-settings" class="page">
+    <div class="card">
+      <div class="card-title">👤 个人固定信息</div>
+      <div id="profile-display" style="margin-bottom:20px;"></div>
+      <div class="form-grid" style="max-width:600px;">
+        <div class="form-group">
+          <label>姓名 / 昵称</label>
+          <input type="text" id="s-name" placeholder="如 魏远甲">
+        </div>
+        <div class="form-group">
+          <label>性别</label>
+          <select id="s-gender">
+            <option value="">请选择</option>
+            <option value="男">男</option>
+            <option value="女">女</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>年龄（岁）</label>
+          <input type="number" id="s-age" placeholder="如 26">
+        </div>
+        <div class="form-group">
+          <label>身高（cm）</label>
+          <input type="number" step="0.1" id="s-height" placeholder="如 175">
+        </div>
+        <div class="form-group">
+          <label>减肥开始体重（kg）</label>
+          <input type="number" step="0.1" id="s-start-weight" placeholder="如 110">
+        </div>
+        <div class="form-group">
+          <label>目标体重（kg）</label>
+          <input type="number" step="0.1" id="s-target-weight" placeholder="如 75">
+        </div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="saveProfile()">💾 保存设置</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">💾 数据管理</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">数据默认存储在浏览器本地（localStorage）。配置 Supabase 后可跨设备同步。</p>
+      <div class="btn-group">
+        <button class="btn btn-secondary" onclick="exportJSON()">📤 导出 JSON 备份</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()">📥 导入 JSON 备份</button>
+        <input type="file" id="import-file" accept=".json" style="display:none;" onchange="importJSON(event)">
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════════
+//  数据结构 & 存储
+// ══════════════════════════════════════════════
+const STORAGE_KEY = 'mi_weight_records';
+const PROFILE_KEY = 'mi_weight_profile';
+
+function loadRecords() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch(e) { return []; }
+}
+function saveRecords(records) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+}
+function loadProfile() {
+  try { return JSON.parse(localStorage.getItem(PROFILE_KEY)) || {}; }
+  catch(e) { return {}; }
+}
+function saveProfileData(p) {
+  localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+}
+
+// ══════════════════════════════════════════════
+//  云同步（Supabase）
+// ══════════════════════════════════════════════
+// 使用方法：
+// 1. 注册 Supabase → https://supabase.com （GitHub / 邮箱均可）
+// 2. 新建项目，获取 Project URL 和 anon public key
+// 3. 填入下方 SUPABASE_CONFIG
+// 4. SQL Editor 中执行建表语句：
+//    CREATE TABLE app_data (
+//      key   TEXT PRIMARY KEY,
+//      value JSONB NOT NULL DEFAULT '{}'
+//    );
+//    ALTER TABLE app_data ENABLE ROW LEVEL SECURITY;
+//    CREATE POLICY "Allow all" ON app_data FOR ALL USING (true) WITH CHECK (true);
+// 5. 部署到 EdgeOne Pages，所有设备打开同一链接即同步
+const SUPABASE_CONFIG = {
+  url:     'https://nhnakdkdjomuozpobeyq.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5obmFrZGtkam9tdW96cG9iZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NDU4MDAsImV4cCI6MjA5NDUyMTgwMH0.ZoFqbEkoDLqM5fhXdGo9Ec2U4JwGRwVjZFZdymnFZVk',
+};
+let _cloudReady = false;
+let _supabase = null;
+
+function initCloud() {
+  if (!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey) return false;
+  try {
+    _supabase = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
+    return true;
+  } catch(e) { console.warn('Supabase init failed:', e); return false; }
+}
+
+function updateCloudStatus(status) {
+  const el = document.getElementById('cloud-status');
+  if (!el) return;
+  const map = {
+    off:     { icon: '\uD83D\uDCF1', tip: '\u672C\u5730\u6A21\u5F0F\uFF08\u672A\u914D\u7F6E\u4E91\u7AEF\uFF09' },
+    syncing: { icon: '\uD83D\uDD04', tip: '\u6B63\u5728\u540C\u6B65...' },
+    ok:      { icon: '\u2601\uFE0F', tip: '\u5DF2\u540C\u6B65\u5230\u4E91\u7AEF' },
+    err:     { icon: '\u26A0\uFE0F', tip: '\u540C\u6B65\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC' },
+  };
+  const s = map[status] || map.off;
+  el.textContent = s.icon;
+  el.title = s.tip;
+}
+
+async function sbFetchOne(dataKey) {
+  const { data, error } = await _supabase
+    .from('app_data')
+    .select('key, value')
+    .eq('key', dataKey)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function sbUpsert(dataKey, jsonStr) {
+  const { error } = await _supabase
+    .from('app_data')
+    .upsert({ key: dataKey, value: jsonStr }, { onConflict: 'key' });
+  if (error) throw error;
+}
+
+async function syncFromCloud() {
+  if (!_cloudReady) { updateCloudStatus('off'); return; }
+  try {
+    updateCloudStatus('syncing');
+    // 同步 records
+    const rObj = await sbFetchOne('records');
+    const localR = localStorage.getItem(STORAGE_KEY);
+    const localArr = localR ? JSON.parse(localR) : [];
+    if (rObj) {
+      // 云端有数据 → 以云端为准
+      localStorage.setItem(STORAGE_KEY, rObj.value);
+    } else if (localArr.length > 0) {
+      // 云端为空，本地有数据 → 首次上传
+      await sbUpsert('records', localR);
+    }
+    // 同步 profile
+    const pObj = await sbFetchOne('profile');
+    const localP = localStorage.getItem(PROFILE_KEY) || '{}';
+    if (pObj) {
+      localStorage.setItem(PROFILE_KEY, pObj.value);
+    } else if (localP !== '{}') {
+      await sbUpsert('profile', localP);
+    }
+    updateCloudStatus('ok');
+  } catch(e) { console.warn('syncFromCloud:', e); updateCloudStatus('err'); }
+}
+
+async function syncToCloud() {
+  if (!_cloudReady) return;
+  try {
+    await sbUpsert('records', localStorage.getItem(STORAGE_KEY) || '[]');
+    await sbUpsert('profile', localStorage.getItem(PROFILE_KEY) || '{}');
+    updateCloudStatus('ok');
+  } catch(e) { console.warn('syncToCloud:', e); updateCloudStatus('err'); }
+}
+
+// 字段映射：id → { label, unit }
+const FIELDS = {
+  weight:          { label: '体重',         unit: 'kg' },
+  bmi:             { label: 'BMI',          unit: '' },
+  bodyFat:         { label: '体脂率',       unit: '%' },
+  heartRate:       { label: '心率',         unit: '次/min' },
+  muscleMass:      { label: '肌肉量',       unit: 'kg' },
+  muscleRate:      { label: '肌肉率',       unit: '%' },
+  proteinMass:     { label: '蛋白质量',     unit: 'kg' },
+  proteinRate:     { label: '蛋白质率',     unit: '%' },
+  waterMass:       { label: '体水分量',     unit: 'kg' },
+  waterRate:       { label: '身体水分',     unit: '%' },
+  boneMass:        { label: '骨盐量',       unit: 'kg' },
+  boneRate:        { label: '骨盐率',       unit: '%' },
+  fatMass:         { label: '脂肪量',       unit: 'kg' },
+  skeletalMuscle:  { label: '骨骼肌量',     unit: 'kg' },
+  visceralFat:     { label: '内脏脂肪等级', unit: '' },
+  whr:             { label: '推测腰臀比',   unit: '' },
+  bodyAge:         { label: '身体年龄',     unit: '岁' },
+  smi:             { label: '骨骼肌指数',   unit: '' },
+  calorieIntake:   { label: '建议热量摄入', unit: 'kcal' },
+  bmr:             { label: '基础代谢率',   unit: 'kcal' },
+  leanMass:        { label: '去脂体重',     unit: 'kg' },
+  fatLeftArm:      { label: '左上肢脂肪',   unit: 'kg' },
+  fatRightArm:     { label: '右上肢脂肪',   unit: 'kg' },
+  fatTrunk:        { label: '躯干脂肪',     unit: 'kg' },
+  fatLeftLeg:      { label: '左下肢脂肪',   unit: 'kg' },
+  fatRightLeg:     { label: '右下肢脂肪',   unit: 'kg' },
+  muscleLeftArm:   { label: '左上肢肌肉',   unit: 'kg' },
+  muscleRightArm:  { label: '右上肢肌肉',   unit: 'kg' },
+  muscleTrunk:     { label: '躯干肌肉',     unit: 'kg' },
+  muscleLeftLeg:   { label: '左下肢肌肉',   unit: 'kg' },
+  muscleRightLeg:  { label: '右下肢肌肉',   unit: 'kg' },
+  bodyScore:       { label: '身体得分',     unit: '' },
+};
+
+// 字段分组
+const FIELD_GROUPS = {
+  core:        ['weight','bmi','bodyFat','heartRate','visceralFat','bodyAge','bodyScore'],
+  'body-comp': ['muscleMass','fatMass','skeletalMuscle','proteinMass','waterMass','boneMass','leanMass'],
+  'part-fat':  ['fatLeftArm','fatRightArm','fatTrunk','fatLeftLeg','fatRightLeg'],
+  'part-muscle':['muscleLeftArm','muscleRightArm','muscleTrunk','muscleLeftLeg','muscleRightLeg'],
+};
+
+// 颜色调色板
+const PALETTE = [
+  '#ff6900','#2563eb','#10b981','#f59e0b','#8b5cf6',
+  '#ef4444','#06b6d4','#84cc16','#f97316','#6366f1',
+  '#14b8a6','#e11d48','#0ea5e9','#a855f7','#22c55e',
+];
+
+// 表单字段 id → record key 映射
+const FORM_MAP = {
+  'f-date':           'date',
+  'f-weight':         'weight',
+  'f-bmi':            'bmi',
+  'f-heart-rate':     'heartRate',
+  'f-body-age':       'bodyAge',
+  'f-body-score':     'bodyScore',
+  'f-visceral-fat':   'visceralFat',
+  'f-whr':            'whr',
+  'f-calorie-intake': 'calorieIntake',
+  'f-bmr':            'bmr',
+  'f-lean-mass':      'leanMass',
+  'f-smi':            'smi',
+  'f-muscle-mass':    'muscleMass',
+  'f-muscle-rate':    'muscleRate',
+  'f-fat-mass':       'fatMass',
+  'f-body-fat':       'bodyFat',
+  'f-skeletal-muscle':'skeletalMuscle',
+  'f-protein-mass':   'proteinMass',
+  'f-protein-rate':   'proteinRate',
+  'f-water-mass':     'waterMass',
+  'f-water-rate':     'waterRate',
+  'f-bone-mass':      'boneMass',
+  'f-bone-rate':      'boneRate',
+  'f-fat-left-arm':   'fatLeftArm',
+  'f-fat-right-arm':  'fatRightArm',
+  'f-fat-trunk':      'fatTrunk',
+  'f-fat-left-leg':   'fatLeftLeg',
+  'f-fat-right-leg':  'fatRightLeg',
+  'f-muscle-left-arm':'muscleLeftArm',
+  'f-muscle-right-arm':'muscleRightArm',
+  'f-muscle-trunk':   'muscleTrunk',
+  'f-muscle-left-leg':'muscleLeftLeg',
+  'f-muscle-right-leg':'muscleRightLeg',
+};
+
+// ══════════════════════════════════════════════
+//  标准参考线配置
+// ══════════════════════════════════════════════
+// 数据来源：
+//   体重/BMI — 中国国家标准 WS/T 428-2013《成人体重判定》正常BMI 18.5~23.9
+//   体脂率   — InBody / Tanita  男性20-39岁健康范围 15%~20%
+//   内脏脂肪 — ≤9 级正常
+//   体水分率 — 男性 55%~65%
+//   蛋白质率 — 成人 14%~18%
+//   骨盐率   — 成人 3%~5%
+//   肌肉率   — 男性 40%~50%（总肌肉占体重比）
+//   骨骼肌指数(SMI) — AWGS 亚洲标准 男性 ≥7.0 kg/m²
+//   腰臀比   — 男性 <0.90
+//   心率     — 成人静息 60~100 次/min
+
+let showRefLines = true;
+
+function getRefLines(heightCm) {
+  const h = ((heightCm || 179) / 100);
+  const wLow   = Math.round(18.5 * h * h * 10) / 10;
+  const wHigh  = Math.round(23.9 * h * h * 10) / 10;
+  const wIdeal = Math.round(22   * h * h * 10) / 10;
+  return {
+    weight: [
+      { label: '标准体重(' + wIdeal + 'kg)',   value: wIdeal, color: '#22c55e' },
+      { label: '正常上界(' + wHigh + 'kg)',    value: wHigh,  color: '#eab308' },
+      { label: '正常下界(' + wLow + 'kg)',     value: wLow,   color: '#22c55e' },
+    ],
+    bmi: [
+      { label: '正常上限(23.9)',  value: 23.9, color: '#eab308' },
+      { label: '正常下限(18.5)',  value: 18.5, color: '#22c55e' },
+    ],
+    bodyFat: [
+      { label: '健康上限(20%)',  value: 20,  color: '#eab308' },
+    ],
+    heartRate: [
+      { label: '上限(100次/min)', value: 100, color: '#eab308' },
+    ],
+    visceralFat: [
+      { label: '正常上限(9级)',  value: 9,   color: '#eab308' },
+    ],
+    muscleRate: [
+      { label: '标准下限(40%)',  value: 40,  color: '#22c55e' },
+    ],
+    proteinRate: [
+      { label: '标准下限(14%)',  value: 14,  color: '#22c55e' },
+    ],
+    waterRate: [
+      { label: '标准下限(55%)',  value: 55,  color: '#22c55e' },
+    ],
+    boneRate: [
+      { label: '标准下限(3%)',   value: 3,   color: '#22c55e' },
+    ],
+    whr: [
+      { label: '正常上限(0.90)', value: 0.9, color: '#eab308' },
+    ],
+    smi: [
+      { label: '正常下限(7.0)',  value: 7.0, color: '#22c55e' },
+    ],
+  };
+}
+
+// ══════════════════════════════════════════════
+//  页面切换
+// ══════════════════════════════════════════════
+function switchPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if (name === 'dashboard') renderDashboard();
+  if (name === 'chart') renderMainChart();
+  if (name === 'history') renderHistory();
+  if (name === 'settings') loadSettingsForm();
+}
+
+// ══════════════════════════════════════════════
+//  Toast 通知
+// ══════════════════════════════════════════════
+let toastTimer = null;
+function showToast(msg, type='info') {
+  const t = document.getElementById('toast');
+  const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+  t.textContent = (icons[type] || '') + ' ' + msg;
+  t.style.background = type === 'success' ? '#27ae60'
+    : type === 'error' ? '#d63031'
+    : type === 'warning' ? '#f39c12' : '#1a1a1a';
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ══════════════════════════════════════════════
+//  录入表单
+// ══════════════════════════════════════════════
+// 默认填写今日日期
+window.addEventListener('DOMContentLoaded', async () => {
+  _cloudReady = initCloud();
+  if (_cloudReady) await syncFromCloud();
+  else updateCloudStatus('off');
+  document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+  renderDashboard();
+  loadSettingsForm();
+});
+
+function readForm() {
+  const rec = {};
+  for (const [fid, key] of Object.entries(FORM_MAP)) {
+    const el = document.getElementById(fid);
+    if (!el) continue;
+    const v = el.value.trim();
+    if (v !== '') rec[key] = key === 'date' ? v : parseFloat(v);
+  }
+  return rec;
+}
+
+function clearForm() {
+  for (const fid of Object.keys(FORM_MAP)) {
+    const el = document.getElementById(fid);
+    if (!el) continue;
+    if (fid === 'f-date') el.value = new Date().toISOString().split('T')[0];
+    else el.value = '';
+  }
+}
+
+// ══════════════════════════════════════════════
+//  概览页
+// ══════════════════════════════════════════════
+let miniChart = null;
+function renderDashboard() {
+  const records = loadRecords();
+  const profile = loadProfile();
+  const wrap = document.getElementById('stats-grid-wrap');
+  const empty = document.getElementById('dashboard-empty');
+
+  if (records.length === 0) {
+    wrap.innerHTML = '';
+    empty.style.display = 'block';
+    if (miniChart) { miniChart.destroy(); miniChart = null; }
+    return;
+  }
+  empty.style.display = 'none';
+
+  const last = records[records.length - 1];
+  const first = records[0];
+  const startW = profile.startWeight || first.weight;
+  const targetW = profile.targetWeight || 75;
+  const lost = (startW - last.weight).toFixed(1);
+  const toGo = (last.weight - targetW).toFixed(1);
+  const progress = Math.min(100, Math.max(0, ((startW - last.weight) / (startW - targetW) * 100))).toFixed(0);
+
+  // 统计卡片
+  const cards = [
+    { label: '当前体重', value: last.weight + ' kg', change: '', changeClass: '' },
+    { label: '已减重', value: lost + ' kg', change: `距目标还差 ${toGo} kg`, changeClass: 'down' },
+    { label: '目标进度', value: progress + ' %', change: '', changeClass: 'good-up' },
+    { label: '体脂率', value: last.bodyFat ? last.bodyFat + ' %' : '--', change: '', changeClass: '' },
+    { label: 'BMI', value: last.bmi ? last.bmi : '--', change: '', changeClass: '' },
+    { label: '身体得分', value: last.bodyScore ? last.bodyScore : '--', change: '', changeClass: '' },
+  ];
+
+  wrap.innerHTML = `<div class="stats-grid">${cards.map(c => `
+    <div class="stat-card">
+      <div class="stat-label">${c.label}</div>
+      <div class="stat-value">${c.value}</div>
+      ${c.change ? `<div class="stat-change ${c.changeClass}">${c.change}</div>` : ''}
+    </div>`).join('')}</div>`;
+
+  // 迷你体重折线图
+  const labels = records.map(r => r.date);
+  const weights = records.map(r => r.weight);
+  const profileH = profile.height || 179;
+  const idealW = Math.round(22 * (profileH / 100) ** 2 * 10) / 10;
+  const ctx = document.getElementById('chart-weight-mini').getContext('2d');
+  if (miniChart) miniChart.destroy();
+  miniChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '体重 (kg)',
+          data: weights,
+          borderColor: '#ff6900',
+          backgroundColor: 'rgba(255,105,0,0.08)',
+          fill: true,
+          tension: 0.35,
+          pointRadius: records.length < 20 ? 4 : 2,
+          pointBackgroundColor: '#ff6900',
+        },
+        {
+          label: '\uD83C\uDFAF \u6211\u7684\u76EE\u6807(' + targetW + 'kg)',
+          data: labels.map(() => targetW),
+          borderColor: '#2563eb',
+          borderWidth: 2,
+          borderDash: [10, 5],
+          backgroundColor: 'transparent',
+          fill: false,
+          pointRadius: 0,
+          tension: 0,
+        },
+        {
+          label: '\u6807\u51C6\u4F53\u91CD(' + idealW + 'kg)',
+          data: labels.map(() => idealW),
+          borderColor: '#22c55e',
+          borderWidth: 1.5,
+          borderDash: [8, 4],
+          backgroundColor: 'transparent',
+          fill: false,
+          pointRadius: 0,
+          tension: 0,
+        },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { font: { size: 11 }, boxWidth: 14, usePointStyle: true, padding: 10 }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8 } },
+        y: {
+          suggestedMin: Math.min(...weights, idealW, targetW) - 3,
+          suggestedMax: Math.max(...weights) + 3,
+        }
+      }
+    }
+  });
+}
+
+// ══════════════════════════════════════════════
+//  图表页
+// ══════════════════════════════════════════════
+let mainChart = null;
+let activeCustomFields = new Set(['weight', 'bodyFat']);
+
+function renderMainChart() {
+  const group = document.getElementById('chart-group').value;
+  const rangeVal = document.getElementById('chart-range').value;
+  let records = loadRecords();
+
+  if (records.length === 0) {
+    const ctx = document.getElementById('chart-main').getContext('2d');
+    if (mainChart) mainChart.destroy();
+    mainChart = null;
+    document.getElementById('chart-tags').innerHTML =
+      '<span style="color:var(--text2);font-size:13px;">暂无数据</span>';
+    return;
+  }
+
+  // 时间筛选
+  if (rangeVal !== 'all') {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - parseInt(rangeVal));
+    const cutStr = cutoff.toISOString().split('T')[0];
+    records = records.filter(r => r.date >= cutStr);
+  }
+
+  // 确定本组字段
+  let fields = group === 'custom'
+    ? [...activeCustomFields]
+    : FIELD_GROUPS[group] || FIELD_GROUPS.core;
+
+  // 渲染字段标签
+  const tagsWrap = document.getElementById('chart-tags');
+  if (group === 'custom') {
+    tagsWrap.innerHTML = Object.entries(FIELDS).map(([k, v], i) => {
+      const active = activeCustomFields.has(k);
+      const color = PALETTE[i % PALETTE.length];
+      return `<span class="chart-tag ${active ? 'active' : ''}"
+        style="color:${color};background:${active ? color + '18' : 'transparent'}"
+        onclick="toggleCustomField('${k}',this,'${color}')">${v.label}</span>`;
+    }).join('');
+  } else {
+    tagsWrap.innerHTML = fields.map((k, i) => {
+      const color = PALETTE[i % PALETTE.length];
+      return `<span class="chart-tag active" style="color:${color};background:${color}18">${FIELDS[k].label}</span>`;
+    }).join('');
+  }
+
+  const labels = records.map(r => r.date);
+  const datasets = fields.map((key, i) => ({
+    label: FIELDS[key] ? FIELDS[key].label + (FIELDS[key].unit ? ` (${FIELDS[key].unit})` : '') : key,
+    data: records.map(r => r[key] != null ? r[key] : null),
+    borderColor: PALETTE[i % PALETTE.length],
+    backgroundColor: PALETTE[i % PALETTE.length] + '15',
+    fill: false,
+    tension: 0.35,
+    pointRadius: records.length < 30 ? 4 : 2,
+    spanGaps: true,
+  }));
+
+  // 标准参考线（虚线）
+  if (showRefLines) {
+    const refProfile = loadProfile();
+    const refLines = getRefLines(refProfile.height);
+    for (const key of fields) {
+      const refs = refLines[key];
+      if (!refs) continue;
+      for (const ref of refs) {
+        datasets.push({
+          label: '\uD83D\uDCCC ' + ref.label,
+          data: labels.map(() => ref.value),
+          borderColor: ref.color,
+          borderWidth: 1.5,
+          borderDash: [8, 4],
+          backgroundColor: 'transparent',
+          fill: false,
+          pointRadius: 0,
+          tension: 0,
+        });
+      }
+    }
+    // 用户目标体重线
+    if (fields.includes('weight')) {
+      const tw = refProfile.targetWeight || 75;
+      datasets.push({
+        label: '\uD83C\uDFAF \u6211\u7684\u76EE\u6807(' + tw + 'kg)',
+        data: labels.map(() => tw),
+        borderColor: '#2563eb',
+        borderWidth: 2,
+        borderDash: [10, 5],
+        backgroundColor: 'transparent',
+        fill: false,
+        pointRadius: 0,
+        tension: 0,
+      });
+    }
+  }
+
+  const ctx = document.getElementById('chart-main').getContext('2d');
+  if (mainChart) mainChart.destroy();
+  mainChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            font: { size: showRefLines ? 11 : 12 },
+            padding: 10,
+            boxWidth: 14,
+            usePointStyle: true,
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const v = ctx.parsed.y;
+              // 参考线和目标线：label 已包含数值，不重复显示
+              if (ctx.dataset.label.startsWith('\uD83D\uDCCC') || ctx.dataset.label.startsWith('\uD83C\uDFAF')) {
+                return ' ' + ctx.dataset.label;
+              }
+              return v != null ? (' ' + ctx.dataset.label + ': ' + v) : (' ' + ctx.dataset.label + ': --');
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10 } },
+        y: { beginAtZero: false }
+      }
+    }
+  });
+}
+
+function toggleCustomField(key, el, color) {
+  if (activeCustomFields.has(key)) {
+    if (activeCustomFields.size <= 1) { showToast('至少选择一个指标', 'warning'); return; }
+    activeCustomFields.delete(key);
+    el.classList.remove('active');
+    el.style.background = 'transparent';
+  } else {
+    activeCustomFields.add(key);
+    el.classList.add('active');
+    el.style.background = color + '18';
+  }
+  renderMainChart();
+}
+
+// ══════════════════════════════════════════════
+//  历史记录页
+// ══════════════════════════════════════════════
+function renderHistory() {
+  const records = loadRecords().slice().reverse();
+  const el = document.getElementById('history-content');
+  if (records.length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">暂无历史记录</div></div>';
+    return;
+  }
+
+  const coreKeys = ['date','weight','bmi','bodyFat','muscleMass','fatMass','visceralFat','bodyScore'];
+  const html = `<table>
+    <thead><tr>
+      <th>测量日期</th>
+      ${coreKeys.slice(1).map(k => `<th>${FIELDS[k]?.label || k}</th>`).join('')}
+      <th style="color:#aaa;font-weight:400;">上传时间</th>
+      <th>操作</th>
+    </tr></thead>
+    <tbody>
+    ${records.map(r => `<tr>
+      <td><strong>${r.date}</strong></td>
+      ${coreKeys.slice(1).map(k => `<td>${r[k] != null ? r[k] : '<span style="color:#ccc">--</span>'}</td>`).join('')}
+      <td style="color:#aaa;font-size:11px;">${r.uploadTime || '--'}</td>
+      <td>
+        <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="editRecord('${r.date}')">编辑</button>
+        <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;margin-left:4px;" onclick="deleteRecord('${r.date}')">删除</button>
+      </td>
+    </tr>`).join('')}
+    </tbody></table>`;
+  el.innerHTML = html;
+}
+
+function editRecord(date) {
+  const records = loadRecords();
+  const rec = records.find(r => r.date === date);
+  if (!rec) return;
+  // 填入表单
+  for (const [fid, key] of Object.entries(FORM_MAP)) {
+    const el = document.getElementById(fid);
+    if (!el) continue;
+    el.value = rec[key] != null ? rec[key] : '';
+  }
+  switchPage('add');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn')[1].classList.add('active');
+  showToast(`已加载 ${date} 的记录，修改后点击保存可覆盖`, 'info');
+}
+
+function deleteRecord(date) {
+  if (!confirm(`确认删除 ${date} 的记录？`)) return;
+  const records = loadRecords().filter(r => r.date !== date);
+  saveRecords(records);
+  renderHistory();
+  showToast(`已删除 ${date} 的记录`, 'success');
+  syncToCloud();
+}
+
+function clearAllData() {
+  if (!confirm('确认清空所有测量数据？此操作不可撤销！')) return;
+  saveRecords([]);
+  renderHistory();
+  showToast('已清空所有数据', 'warning');
+  syncToCloud();
+}
+
+// ══════════════════════════════════════════════
+//  设置页
+// ══════════════════════════════════════════════
+function loadSettingsForm() {
+  const p = loadProfile();
+  document.getElementById('s-name').value = p.name || '';
+  document.getElementById('s-gender').value = p.gender || '';
+  document.getElementById('s-age').value = p.age || '';
+  document.getElementById('s-height').value = p.height || '';
+  document.getElementById('s-start-weight').value = p.startWeight || '';
+  document.getElementById('s-target-weight').value = p.targetWeight || '';
+
+  const disp = document.getElementById('profile-display');
+  if (p.name) {
+    disp.innerHTML = `
+      <div class="profile-avatar">${p.name[0] || '👤'}</div>
+      <div class="profile-name">${p.name}</div>
+      <div class="profile-sub">${p.gender || ''} · ${p.age || '--'}岁 · ${p.height || '--'}cm</div>
+      ${p.startWeight ? `<div class="profile-sub" style="margin-top:4px;">起始体重：${p.startWeight}kg → 目标：${p.targetWeight || '--'}kg</div>` : ''}`;
+  } else {
+    disp.innerHTML = '<div style="color:var(--text2);font-size:13px;">尚未填写个人信息</div>';
+  }
+}
+
+function saveProfile() {
+  const p = {
+    name:         document.getElementById('s-name').value.trim(),
+    gender:       document.getElementById('s-gender').value,
+    age:          parseFloat(document.getElementById('s-age').value) || null,
+    height:       parseFloat(document.getElementById('s-height').value) || null,
+    startWeight:  parseFloat(document.getElementById('s-start-weight').value) || null,
+    targetWeight: parseFloat(document.getElementById('s-target-weight').value) || null,
+  };
+  saveProfileData(p);
+  loadSettingsForm();
+  showToast('个人信息已保存', 'success');
+  syncToCloud();
+}
+
+// ══════════════════════════════════════════════
+//  导入 / 导出
+// ══════════════════════════════════════════════
+function exportCSV() {
+  const records = loadRecords();
+  if (!records.length) { showToast('没有数据可导出', 'warning'); return; }
+  const keys = ['date', ...Object.keys(FIELDS)];
+  const headers = ['日期', ...Object.values(FIELDS).map(f => f.label + (f.unit ? `(${f.unit})` : ''))];
+  const rows = records.map(r => keys.map(k => r[k] != null ? r[k] : '').join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  download('weight_records.csv', 'text/csv;charset=utf-8;', '\uFEFF' + csv);
+  showToast('CSV 已导出', 'success');
+}
+
+function exportJSON() {
+  const data = { profile: loadProfile(), records: loadRecords(), exportTime: new Date().toISOString() };
+  download('weight_backup.json', 'application/json', JSON.stringify(data, null, 2));
+  showToast('JSON 备份已导出', 'success');
+}
+
+function importJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.records && Array.isArray(data.records)) {
+        if (!confirm(`即将导入 ${data.records.length} 条记录，将覆盖现有数据，确认吗？`)) return;
+        saveRecords(data.records);
+        if (data.profile) saveProfileData(data.profile);
+        showToast(`已导入 ${data.records.length} 条记录`, 'success');
+        syncToCloud();
+        renderDashboard();
+      } else {
+        showToast('JSON 格式不正确', 'error');
+      }
+    } catch(err) {
+      showToast('解析 JSON 失败: ' + err.message, 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function download(filename, mime, content) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── 保存记录 ──
+function saveRecord() {
+  const rec = readForm();
+  if (!rec.date) { showToast('请先填写测量日期', 'error'); return; }
+  if (!rec.weight) { showToast('至少需要填写体重', 'error'); return; }
+
+  // 附带录入时间
+  if (!rec.uploadTime) {
+    rec.uploadTime = new Date().toLocaleString('zh-CN', { hour12: false });
+  }
+
+  const records = loadRecords();
+  const existIdx = records.findIndex(r => r.date === rec.date);
+  if (existIdx >= 0) {
+    if (!confirm(`${rec.date} 已有记录，是否覆盖？`)) return;
+    records[existIdx] = rec;
+    showToast(`已更新 ${rec.date} 的记录`, 'success');
+  } else {
+    records.push(rec);
+    showToast(`已保存 ${rec.date} 的记录`, 'success');
+  }
+  records.sort((a, b) => a.date.localeCompare(b.date));
+  saveRecords(records);
+  syncToCloud();
+}
+</script>
+</body>
+</html>
