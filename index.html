@@ -597,12 +597,16 @@ tbody tr:hover { background: var(--primary-light); }
         当前状态：<span id="pw-status-badge" class="pw-badge off">未设置</span>
       </p>
       <div class="form-grid" style="max-width:400px;">
-        <div class="form-group">
-          <label>设置 / 修改密码</label>
-          <input type="password" id="s-pw-new" placeholder="输入新密码（至少4位）">
+        <div class="form-group" id="s-pw-old-group">
+          <label>原密码</label>
+          <input type="password" id="s-pw-old" placeholder="输入当前密码">
         </div>
         <div class="form-group">
-          <label>确认密码</label>
+          <label>新密码（至少4位）</label>
+          <input type="password" id="s-pw-new" placeholder="输入新密码">
+        </div>
+        <div class="form-group">
+          <label>确认新密码</label>
           <input type="password" id="s-pw-confirm" placeholder="再次输入新密码">
         </div>
       </div>
@@ -774,44 +778,74 @@ async function savePwHash(hash) {
   }
 }
 
-// 设置密码（设置页调用）
+// 设置密码（设置页调用）— 已有密码时必须验证原密码
 async function setWritePassword() {
+  const existingHash = getPwHash();
+  // 如果已经设置了密码，必须先验证原密码
+  if (existingHash && !_pwVerified) {
+    const oldPw = document.getElementById('s-pw-old').value;
+    if (!oldPw) { showToast('请先输入原密码', 'error'); document.getElementById('s-pw-old').focus(); return; }
+    const oldHash = await sha256(oldPw);
+    if (oldHash !== existingHash) { showToast('原密码错误', 'error'); document.getElementById('s-pw-old').value = ''; return; }
+  }
+
   const pw = document.getElementById('s-pw-new').value;
   const confirm = document.getElementById('s-pw-confirm').value;
-  if (!pw) { showToast('请输入密码', 'error'); return; }
+  if (!pw) { showToast('请输入新密码', 'error'); return; }
   if (pw.length < 4) { showToast('密码至少4位', 'error'); return; }
   if (pw !== confirm) { showToast('两次输入不一致', 'error'); return; }
   const hash = await sha256(pw);
   await savePwHash(hash);
   _pwVerified = true;
   sessionStorage.setItem(PW_KEY + '_ok', '1');
+  document.getElementById('s-pw-old').value = '';
   document.getElementById('s-pw-new').value = '';
   document.getElementById('s-pw-confirm').value = '';
   updatePwBadge();
-  showToast('写入密码已设置', 'success');
+  showToast('写入密码已更新', 'success');
 }
 
-// 清除密码
+// 清除密码 — 必须验证原密码
 async function removeWritePassword() {
+  const existingHash = getPwHash();
+  if (!existingHash) { showToast('当前未设置密码', 'info'); return; }
+
+  // 如果本次会话已验证，直接确认清除
+  if (_pwVerified) {
+    if (!confirm('确认清除写入密码？之后任何人都可以修改数据。')) return;
+    await savePwHash('');
+    _pwVerified = false;
+    sessionStorage.removeItem(PW_KEY + '_ok');
+    updatePwBadge();
+    showToast('写入密码已清除', 'success');
+    return;
+  }
+
+  // 未验证 → 弹窗验证原密码后再确认
+  const oldPw = document.getElementById('s-pw-old').value;
+  if (!oldPw) { showToast('请先输入原密码', 'error'); document.getElementById('s-pw-old').focus(); return; }
+  const oldHash = await sha256(oldPw);
+  if (oldHash !== existingHash) { showToast('原密码错误', 'error'); document.getElementById('s-pw-old').value = ''; return; }
   if (!confirm('确认清除写入密码？之后任何人都可以修改数据。')) return;
   await savePwHash('');
   _pwVerified = false;
   sessionStorage.removeItem(PW_KEY + '_ok');
+  document.getElementById('s-pw-old').value = '';
   updatePwBadge();
   showToast('写入密码已清除', 'success');
 }
 
-// 更新密码状态徽章
+// 更新密码状态徽章 & 控制原密码输入框显示
 function updatePwBadge() {
   const badge = document.getElementById('pw-status-badge');
-  if (!badge) return;
+  const oldGroup = document.getElementById('s-pw-old-group');
   const hash = getPwHash();
   if (hash) {
-    badge.className = 'pw-badge on';
-    badge.textContent = '已启用';
+    if (badge) { badge.className = 'pw-badge on'; badge.textContent = '已启用'; }
+    if (oldGroup) oldGroup.style.display = '';
   } else {
-    badge.className = 'pw-badge off';
-    badge.textContent = '未设置';
+    if (badge) { badge.className = 'pw-badge off'; badge.textContent = '未设置'; }
+    if (oldGroup) oldGroup.style.display = 'none';
   }
 }
 
