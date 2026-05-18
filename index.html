@@ -335,6 +335,91 @@ tbody tr:hover { background: var(--primary-light); }
   .tab-btn { padding: 8px 12px; font-size: 13px; }
   .chart-wrap { height: 280px; }
 }
+
+/* ── OCR 拍照识别 ── */
+.ocr-upload-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 28px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .2s;
+  background: var(--bg);
+}
+.ocr-upload-area:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.ocr-upload-icon { font-size: 36px; margin-bottom: 6px; }
+.ocr-upload-text { font-size: 15px; font-weight: 600; color: var(--text); }
+.ocr-upload-hint { font-size: 12px; color: var(--text2); margin-top: 4px; }
+
+.ocr-preview-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+.ocr-preview-img {
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+.ocr-status {
+  font-size: 14px;
+  color: var(--text2);
+  padding: 8px 0;
+  flex: 1;
+}
+.ocr-raw-text {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--bg);
+  border-radius: 6px;
+  word-break: break-all;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.ocr-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.ocr-result-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-radius: 8px;
+  font-size: 13px;
+  border-left: 3px solid var(--primary);
+}
+.ocr-result-item .label { color: var(--text2); }
+.ocr-result-item .value { font-weight: 700; color: var(--text); }
+
+.ocr-error-msg {
+  padding: 12px 16px;
+  background: #fff0f0;
+  color: #d63031;
+  border-radius: 8px;
+  font-size: 13px;
+  white-space: pre-line;
+}
+
+@keyframes ocrPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.ocr-loading { animation: ocrPulse 1.5s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -375,6 +460,51 @@ tbody tr:hover { background: var(--primary-light); }
 
   <!-- ════ 录入页 ════ -->
   <div id="page-add" class="page">
+
+    <!-- 拍照识别 -->
+    <div class="card">
+      <div class="card-title">📷 拍照识别</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">
+        拍一张体重秤显示的照片，自动识别数据并填入下方表单
+      </p>
+
+      <!-- 上传区域 -->
+      <div id="ocr-upload" class="ocr-upload-area" onclick="document.getElementById('ocr-file').click()">
+        <div class="ocr-upload-icon">📷</div>
+        <div class="ocr-upload-text">点击拍照或上传照片</div>
+        <div class="ocr-upload-hint">手机可直接调起相机 · 支持 JPG / PNG</div>
+      </div>
+      <input type="file" id="ocr-file" accept="image/jpeg,image/png,image/bmp" capture="environment" style="display:none" onchange="handleOCRImageSelect(event)">
+
+      <!-- 预览 + 结果区域（默认隐藏） -->
+      <div id="ocr-preview-wrap" style="display:none">
+        <div class="ocr-preview-row">
+          <img id="ocr-preview-img" class="ocr-preview-img" alt="预览">
+          <div>
+            <div id="ocr-status" class="ocr-status">准备识别...</div>
+            <div id="ocr-raw-text" class="ocr-raw-text" style="display:none"></div>
+          </div>
+        </div>
+
+        <!-- 识别结果 -->
+        <div id="ocr-results" style="display:none">
+          <div class="section-label">✅ 识别结果</div>
+          <div id="ocr-results-grid" class="ocr-results-grid"></div>
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="fillFromOCR()">✅ 填入表单</button>
+            <button class="btn btn-secondary" onclick="resetOCR()">🔄 重新拍照</button>
+          </div>
+        </div>
+
+        <!-- 错误信息 -->
+        <div id="ocr-error" style="display:none">
+          <div class="ocr-error-msg" id="ocr-error-msg"></div>
+          <div class="btn-group" style="margin-top:10px">
+            <button class="btn btn-secondary" onclick="resetOCR()">🔄 重新拍照</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- 手动录入表单 -->
     <div class="card">
@@ -1553,6 +1683,199 @@ function download(filename, mime, content) {
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
+}
+
+// ══════════════════════════════════════════════
+//  OCR 拍照识别
+// ══════════════════════════════════════════════
+const OCR_PROXY = '/api/ocr';   // Cloudflare Pages Function（同域名，无 CORS 问题）
+let _ocrParsedData = {};        // 存储最近一次识别结果 { weight: 94.5, bodyFat: 25.3, ... }
+
+/**
+ * OCR 字段匹配规则
+ * 按名称长度降序排列（长名称优先匹配，避免"骨骼肌指数"被"骨骼肌"截断）
+ */
+const OCR_PATTERNS = [
+  { regex: /身体得分[\s:：]*([\d.]+)/,       field: 'bodyScore' },
+  { regex: /建议热量[摄]?[\s:：]*([\d.]+)/,  field: 'calorieIntake' },
+  { regex: /骨骼肌指数[\s:：]*([\d.]+)/,     field: 'smi' },
+  { regex: /推测腰臀比[\s:：]*([\d.]+)/,     field: 'whr' },
+  { regex: /腰臀比[\s:：]*([\d.]+)/,         field: 'whr' },
+  { regex: /去脂体重[\s:：]*([\d.]+)/,       field: 'leanMass' },
+  { regex: /基础代谢[率]?[\s:：]*([\d.]+)/,   field: 'bmr' },
+  { regex: /身体年龄[\s:：]*([\d.]+)/,       field: 'bodyAge' },
+  { regex: /内脏脂肪[等级]?[\s:：]*([\d.]+)/,field: 'visceralFat' },
+  { regex: /蛋白质率[\s:：]*([\d.]+)/,       field: 'proteinRate' },
+  { regex: /水分率[\s:：]*([\d.]+)/,         field: 'waterRate' },
+  { regex: /肌肉率[\s:：]*([\d.]+)/,         field: 'muscleRate' },
+  { regex: /骨盐率[\s:：]*([\d.]+)/,         field: 'boneRate' },
+  { regex: /体脂[率]?[\s:：]*([\d.]+)/,      field: 'bodyFat' },
+  { regex: /骨骼肌[量]?[\s:：]*([\d.]+)/,    field: 'skeletalMuscle' },
+  { regex: /体水分[量]?[\s:：]*([\d.]+)/,    field: 'waterMass' },
+  { regex: /蛋白质[量]?[\s:：]*([\d.]+)/,    field: 'proteinMass' },
+  { regex: /骨盐量[\s:：]*([\d.]+)/,         field: 'boneMass' },
+  { regex: /脂肪量[\s:：]*([\d.]+)/,         field: 'fatMass' },
+  { regex: /肌肉量[\s:：]*([\d.]+)/,         field: 'muscleMass' },
+  { regex: /体重[\s:：]*([\d.]+)/,           field: 'weight' },
+  { regex: /BMI[\s:：]*([\d.]+)/i,           field: 'bmi' },
+  { regex: /心率[\s:：]*([\d.]+)/,           field: 'heartRate' },
+];
+
+/** 选择文件后触发 */
+function handleOCRImageSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  // 显示图片预览
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById('ocr-preview-img').src = e.target.result;
+    document.getElementById('ocr-upload').style.display    = 'none';
+    document.getElementById('ocr-preview-wrap').style.display = 'block';
+    document.getElementById('ocr-results').style.display  = 'none';
+    document.getElementById('ocr-error').style.display    = 'none';
+    document.getElementById('ocr-raw-text').style.display = 'none';
+    document.getElementById('ocr-status').textContent     = '⏳ 图片压缩中...';
+    document.getElementById('ocr-status').className       = 'ocr-status';
+
+    // 压缩后调用 OCR
+    compressImage(file, 1024, 0.8)
+      .then(base64 => performOCR(base64))
+      .catch(err => showOCRError('图片处理失败: ' + err.message));
+  };
+  reader.readAsDataURL(file);
+}
+
+/** 客户端压缩图片（Canvas 缩放 + JPEG） */
+function compressImage(file, maxWidth, quality) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height;
+      if (w > maxWidth) { h = (h * maxWidth) / w; w = maxWidth; }
+      canvas.width  = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      // 去掉 data:image/jpeg;base64, 前缀
+      resolve(dataUrl.replace(/^data:image\/\w+;base64,/, ''));
+    };
+    img.onerror = () => reject(new Error('无法加载图片'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/** 调用 OCR 代理并解析结果 */
+async function performOCR(base64) {
+  document.getElementById('ocr-status').textContent = '⏳ 识别中，请稍候...';
+  document.getElementById('ocr-status').className   = 'ocr-status ocr-loading';
+
+  try {
+    const resp = await fetch(OCR_PROXY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64 }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `请求失败 (${resp.status})`);
+    }
+
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    const textDetections = data.TextDetections || [];
+    if (textDetections.length === 0) {
+      showOCRError('未识别到任何文字，请确保照片清晰且包含体重秤显示内容');
+      return;
+    }
+
+    // 合并所有识别文字
+    const allText = textDetections.map(t => t.DetectedText).join('\n');
+    console.log('[OCR] 原始识别文字:\n', allText);
+
+    // 用正则匹配各字段
+    _ocrParsedData = {};
+    for (const p of OCR_PATTERNS) {
+      const m = allText.match(p.regex);
+      if (m) _ocrParsedData[p.field] = parseFloat(m[1]);
+    }
+
+    if (Object.keys(_ocrParsedData).length === 0) {
+      showOCRError('识别到文字但未匹配到身体数据字段，请手动录入。\n\n原始文字：' + allText.substring(0, 300));
+      return;
+    }
+
+    // 显示成功结果
+    document.getElementById('ocr-status').textContent =
+      `✅ 识别完成，匹配到 ${Object.keys(_ocrParsedData).length} 项数据`;
+    document.getElementById('ocr-status').className = 'ocr-status';
+
+    // 显示原始文字（可折叠）
+    const rawEl = document.getElementById('ocr-raw-text');
+    rawEl.textContent = allText;
+    rawEl.style.display = 'block';
+
+    // 渲染结果网格
+    const grid = document.getElementById('ocr-results-grid');
+    grid.innerHTML = Object.entries(_ocrParsedData).map(([key, val]) => {
+      const info = FIELDS[key] || { label: key, unit: '' };
+      return `<div class="ocr-result-item">
+        <span class="label">${info.label}</span>
+        <span class="value">${val} ${info.unit}</span>
+      </div>`;
+    }).join('');
+
+    document.getElementById('ocr-results').style.display = 'block';
+
+  } catch (err) {
+    showOCRError('识别失败: ' + err.message);
+  }
+}
+
+function showOCRError(msg) {
+  document.getElementById('ocr-status').textContent = '❌ 识别失败';
+  document.getElementById('ocr-status').className = 'ocr-status';
+  document.getElementById('ocr-error').style.display = 'block';
+  document.getElementById('ocr-error-msg').textContent = msg;
+}
+
+/** 将识别结果填入录入表单 */
+function fillFromOCR() {
+  if (!_ocrParsedData || Object.keys(_ocrParsedData).length === 0) {
+    showToast('没有可填入的数据', 'warning');
+    return;
+  }
+
+  // 反向映射：record key → form element id
+  const reverseMap = {};
+  for (const [fid, key] of Object.entries(FORM_MAP)) reverseMap[key] = fid;
+
+  let filled = 0;
+  for (const [field, value] of Object.entries(_ocrParsedData)) {
+    const fid = reverseMap[field];
+    if (fid) {
+      const el = document.getElementById(fid);
+      if (el) { el.value = value; filled++; }
+    }
+  }
+
+  showToast(`已填入 ${filled} 项数据，请核对后点击保存`, 'success');
+  document.getElementById('f-date').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/** 重置 OCR 区域回到初始状态 */
+function resetOCR() {
+  _ocrParsedData = {};
+  document.getElementById('ocr-upload').style.display      = '';
+  document.getElementById('ocr-preview-wrap').style.display = 'none';
+  document.getElementById('ocr-results').style.display      = 'none';
+  document.getElementById('ocr-error').style.display        = 'none';
+  document.getElementById('ocr-raw-text').style.display     = 'none';
+  document.getElementById('ocr-file').value                = '';
 }
 
 // ── 保存记录 ──

@@ -1,0 +1,18 @@
+# WorkBuddy
+.codebuddy/
+.workbuddy/
+
+# Screenshots & temp files
+*.jpg
+*.jpeg
+*.png
+*.gif
+!assets/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
